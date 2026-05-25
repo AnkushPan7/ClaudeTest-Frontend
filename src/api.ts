@@ -95,10 +95,11 @@ export type QuestionReviewItem = {
   title: string;
   text: string;
   options: Record<string, string>;
-  selectedAnswer: string;
+  selectedAnswer: string | null;
   correctAnswer: string;
   isCorrect: boolean;
   explanation: string;
+  answered: boolean;
 };
 
 export type SessionReview = {

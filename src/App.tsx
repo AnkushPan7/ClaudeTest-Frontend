@@ -16,7 +16,7 @@ import {
   type SessionExamTargets,
 } from './api';
 
-type Screen = 'home' | 'quiz' | 'results';
+type Screen = 'home' | 'quiz' | 'submit-review' | 'results';
 
 function formatRemainingTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -40,6 +40,7 @@ export default function App() {
   const [index, setIndex] = useState(0);
   const [question, setQuestion] = useState<QuestionDto | null>(null);
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+  const [answersByIndex, setAnswersByIndex] = useState<Record<number, string>>({});
   const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [review, setReview] = useState<QuestionReviewItem[]>([]);
   const [sessionTargets, setSessionTargets] = useState<SessionExamTargets | null>(null);
@@ -79,6 +80,7 @@ export default function App() {
       setSession(s);
       setIndex(0);
       setSelectedLetter(null);
+      setAnswersByIndex({});
       setReview([]);
       const q = await fetchQuestion(s.sessionId, 0);
       setQuestion(q);
@@ -95,17 +97,46 @@ export default function App() {
   };
 
   const pickAnswer = async (letter: string) => {
-    if (!session || selectedLetter) return;
+    if (!session || loading) return;
     setSelectedLetter(letter);
+    setAnswersByIndex((prev) => ({ ...prev, [index]: letter }));
     setLoading(true);
     try {
       await submitAnswer(session.sessionId, index, letter);
     } catch {
-      setSelectedLetter(null);
-      setError('Failed to submit answer.');
+      setError('Failed to save answer.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const navigateToQuestion = useCallback(
+    async (targetIndex: number) => {
+      if (!session) return;
+      setLoading(true);
+      setError(null);
+      try {
+        setIndex(targetIndex);
+        setSelectedLetter(answersByIndex[targetIndex] ?? null);
+        const q = await fetchQuestion(session.sessionId, targetIndex);
+        setQuestion(q);
+      } catch {
+        setError('Failed to load question.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [session, answersByIndex],
+  );
+
+  const goPrevious = () => {
+    if (index <= 0) return;
+    void navigateToQuestion(index - 1);
+  };
+
+  const goNext = () => {
+    if (!session || index + 1 >= session.totalQuestions) return;
+    void navigateToQuestion(index + 1);
   };
 
   const finishSession = useCallback(async () => {
@@ -117,8 +148,14 @@ export default function App() {
         fetchSummary(session.sessionId),
         fetchReview(session.sessionId),
       ]);
+      const sortedReview = [...rev.questions].sort((a, b) => a.index - b.index);
+      if (sortedReview.length < sum.total) {
+        setError(
+          `Review shows ${sortedReview.length} of ${sum.total} questions. Restart the .NET backend and submit again.`,
+        );
+      }
       setSummary(sum);
-      setReview(rev.questions);
+      setReview(sortedReview);
       setScreen('results');
     } catch {
       setError('Failed to load results.');
@@ -127,32 +164,39 @@ export default function App() {
     }
   }, [session]);
 
-  const finishOrNext = useCallback(async () => {
-    if (!session || !selectedLetter) return;
-    const next = index + 1;
-    setLoading(true);
+  const proceedToSubmitReview = useCallback(() => {
+    if (!session) return;
     setError(null);
-    try {
-      if (next >= session.totalQuestions) {
-        await finishSession();
-        return;
+    setScreen('submit-review');
+  }, [session]);
+
+  const goToQuestionFromReview = useCallback(
+    (questionIndex: number) => {
+      if (!session) return;
+      setError(null);
+      setScreen('quiz');
+      if (index !== questionIndex) {
+        void navigateToQuestion(questionIndex);
       }
-      setIndex(next);
-      setSelectedLetter(null);
-      const q = await fetchQuestion(session.sessionId, next);
-      setQuestion(q);
-    } catch {
-      setError('Failed to continue.');
-    } finally {
-      setLoading(false);
-    }
-  }, [session, index, selectedLetter, finishSession]);
+    },
+    [session, index, navigateToQuestion],
+  );
+
+  const backToExam = useCallback(() => {
+    if (!session) return;
+    goToQuestionFromReview(session.totalQuestions - 1);
+  }, [session, goToQuestionFromReview]);
+
+  const submitExam = useCallback(async () => {
+    if (!session) return;
+    await finishSession();
+  }, [session, finishSession]);
 
   const finishSessionRef = useRef(finishSession);
   finishSessionRef.current = finishSession;
 
   useEffect(() => {
-    if (screen !== 'quiz' || !session) return;
+    if ((screen !== 'quiz' && screen !== 'submit-review') || !session) return;
 
     const tick = () => {
       setRemainingSeconds((prev) => Math.max(0, prev - 1));
@@ -163,7 +207,12 @@ export default function App() {
   }, [screen, session?.sessionId]);
 
   useEffect(() => {
-    if (screen !== 'quiz' || !session || remainingSeconds > 0 || timeUpHandled.current) {
+    if (
+      (screen !== 'quiz' && screen !== 'submit-review') ||
+      !session ||
+      remainingSeconds > 0 ||
+      timeUpHandled.current
+    ) {
       return;
     }
     timeUpHandled.current = true;
@@ -178,6 +227,7 @@ export default function App() {
     setSummary(null);
     setReview([]);
     setIndex(0);
+    setAnswersByIndex({});
     setSessionTargets(null);
     setRemainingSeconds(0);
     timeUpHandled.current = false;
@@ -199,6 +249,12 @@ export default function App() {
       ? scaledScore >= resultsTargets.passingScore
       : false;
 
+  const answeredCount = Object.keys(answersByIndex).length;
+  const totalQuestions = session?.totalQuestions ?? 0;
+  const unansweredCount = Math.max(0, totalQuestions - answeredCount);
+  const isLastQuestion = session ? index + 1 >= session.totalQuestions : false;
+  const showExamTimer = screen === 'quiz' || screen === 'submit-review';
+
   return (
     <div className="app">
       <header className="header">
@@ -209,7 +265,7 @@ export default function App() {
             <p>Practice exam — By AppUnik</p>
           </div>
         </div>
-        {screen === 'quiz' && session && sessionTargets && (
+        {showExamTimer && session && sessionTargets && (
           <div className="header-stats">
             <span
               className={`mono exam-timer ${remainingSeconds <= 300 ? 'timer-low' : ''}`}
@@ -218,9 +274,12 @@ export default function App() {
               {formatRemainingTime(remainingSeconds)} /{' '}
               {formatRemainingTime(sessionTargets.timeLimitSeconds)}
             </span>
-            <span className="mono">
-              Q{index + 1}/{session.totalQuestions}
-            </span>
+            {screen === 'quiz' && (
+              <span className="mono">
+                Q{index + 1}/{session.totalQuestions}
+              </span>
+            )}
+            {screen === 'submit-review' && <span className="muted">Submit review</span>}
           </div>
         )}
       </header>
@@ -277,7 +336,7 @@ export default function App() {
                       }}
                     />
                     <span>
-                      <strong>JSON bank</strong> — random pick from 60 saved questions (fast)
+                      <strong>Sample Exam(Real Claude Certified Architect Exam)</strong> — random pick from 60 saved questions (fast)
                     </span>
                   </label>
                   <label className="checkbox">
@@ -295,7 +354,10 @@ export default function App() {
                       <strong>AI from learning URL</strong> — Claude writes new questions each
                       session
                       {!meta.aiGenerationAvailable && (
-                        <em className="muted"> (set ANTHROPIC_API_KEY on the API)</em>
+                        <em className="muted">
+                          {' '}
+                          (set ANTHROPIC_API_KEY or AnthropicApiKey in backend .env)
+                        </em>
                       )}
                     </span>
                   </label>
@@ -422,7 +484,7 @@ export default function App() {
                     key={letter}
                     className={`option ${state}`}
                     onClick={() => pickAnswer(letter)}
-                    disabled={!!selectedLetter || loading}
+                    disabled={loading}
                   >
                     <span className="letter">{letter}</span>
                     <span>{text}</span>
@@ -431,22 +493,150 @@ export default function App() {
               })}
             </div>
 
-            {selectedLetter && (
-              <div className="quiz-actions">
-                <p className="hint">Answer saved. Results are shown after you finish the session.</p>
-                <button className="btn primary" onClick={finishOrNext} disabled={loading}>
-                  {index + 1 >= (session?.totalQuestions ?? 0) ? 'Finish & view results' : 'Next question'}
+            <div className="quiz-actions">
+              <p className="hint">
+                You can change your answer or revisit earlier questions until you proceed to submit.
+                {answeredCount > 0 && (
+                  <>
+                    {' '}
+                    <span className="mono">
+                      {answeredCount}/{session?.totalQuestions ?? 0}
+                    </span>{' '}
+                    answered.
+                  </>
+                )}
+              </p>
+              <div className="quiz-nav">
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={goPrevious}
+                  disabled={loading || index <= 0}
+                >
+                  Previous
                 </button>
+                {isLastQuestion ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={proceedToSubmitReview}
+                    disabled={loading}
+                  >
+                    Proceed to Submit Exam
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={goNext}
+                    disabled={loading}
+                  >
+                    Next question
+                  </button>
+                )}
               </div>
-            )}
+            </div>
 
             <div className="progress">
               <div
                 className="progress-bar"
                 style={{
-                  width: `${((index + (selectedLetter ? 1 : 0)) / (session?.totalQuestions ?? 1)) * 100}%`,
+                  width: `${(answeredCount / (session?.totalQuestions ?? 1)) * 100}%`,
                 }}
               />
+            </div>
+          </section>
+        )}
+
+        {screen === 'submit-review' && session && (
+          <section className="card submit-review-card">
+            <h2>Submit exam</h2>
+            <p className="muted">
+              Review your progress before final submission. You can go back to change answers.
+            </p>
+            {sessionTargets && (
+              <div className="quiz-timer-bar">
+                <span className="muted">Time remaining</span>
+                <span
+                  className={`mono exam-timer ${remainingSeconds <= 300 ? 'timer-low' : ''}`}
+                >
+                  {formatRemainingTime(remainingSeconds)} /{' '}
+                  {formatRemainingTime(sessionTargets.timeLimitSeconds)}
+                </span>
+              </div>
+            )}
+            <ul className="stats submit-stats">
+              <li>
+                <strong>{totalQuestions}</strong>
+                total questions
+              </li>
+              <li>
+                <strong>{answeredCount}</strong>
+                answered
+              </li>
+              <li>
+                <strong className={unansweredCount > 0 ? 'stat-warn' : ''}>
+                  {unansweredCount}
+                </strong>
+                unanswered
+              </li>
+            </ul>
+            {unansweredCount > 0 && (
+              <p className="hint submit-warn">
+                You have {unansweredCount} unanswered question
+                {unansweredCount === 1 ? '' : 's'}. Unanswered questions count as incorrect.
+              </p>
+            )}
+            <div className="question-palette">
+              <p className="hint">Click a number to go to that question.</p>
+              <div className="question-palette-grid" role="navigation" aria-label="Question list">
+                {Array.from({ length: totalQuestions }, (_, i) => {
+                  const answered = answersByIndex[i] != null;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`palette-box ${answered ? 'answered' : 'unanswered'}`}
+                      onClick={() => goToQuestionFromReview(i)}
+                      disabled={loading}
+                      title={
+                        answered
+                          ? `Question ${i + 1} — answered`
+                          : `Question ${i + 1} — unanswered`
+                      }
+                      aria-label={
+                        answered
+                          ? `Question ${i + 1}, answered`
+                          : `Question ${i + 1}, unanswered`
+                      }
+                    >
+                      {i + 1}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="palette-legend hint">
+                <span className="legend-swatch answered" /> Answered
+                <span className="legend-swatch unanswered" /> Unanswered
+              </p>
+            </div>
+            <div className="submit-review-actions">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={backToExam}
+                disabled={loading}
+              >
+                Back to exam
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => void submitExam()}
+                disabled={loading}
+              >
+                {loading ? 'Submitting…' : 'Submit exam'}
+              </button>
             </div>
           </section>
         )}
@@ -487,42 +677,65 @@ export default function App() {
             {review.length > 0 && (
               <div className="review-section">
                 <h3>Answer review</h3>
-                <p className="hint">Your selection, the correct answer, and explanation for each question.</p>
-                {review.map((item) => (
-                  <details
-                    key={item.index}
-                    className={`review-item ${item.isCorrect ? 'review-ok' : 'review-bad'}`}
-                  >
-                    <summary>
-                      <span className="review-qnum">Q{item.index + 1}</span>
-                      <span className="review-title">{item.title}</span>
-                      <span className={`review-badge ${item.isCorrect ? 'ok' : 'bad'}`}>
-                        {item.isCorrect ? 'Correct' : 'Incorrect'}
-                      </span>
-                    </summary>
-                    <div className="review-body">
-                      <p className="pill">{item.sectionName}</p>
-                      <p className="question-text">{item.text}</p>
-                      <ul className="review-answers">
-                        <li>
-                          <strong>Your answer:</strong> {item.selectedAnswer} —{' '}
-                          {item.options[item.selectedAnswer]}
-                        </li>
-                        <li>
-                          <strong>Correct answer:</strong> {item.correctAnswer} —{' '}
-                          {item.options[item.correctAnswer]}
-                        </li>
-                      </ul>
-                      <p className="review-explanation">{item.explanation}</p>
-                    </div>
-                  </details>
-                ))}
+                <p className="hint">
+                  All questions in your session — answered, unanswered, correct, and incorrect.
+                </p>
+                {review.map((item) => {
+                  const statusClass = !item.answered
+                    ? 'unanswered'
+                    : item.isCorrect
+                      ? 'ok'
+                      : 'bad';
+                  const statusLabel = !item.answered
+                    ? 'Unanswered'
+                    : item.isCorrect
+                      ? 'Correct'
+                      : 'Incorrect';
+                  const itemClass = !item.answered
+                    ? 'review-unanswered'
+                    : item.isCorrect
+                      ? 'review-ok'
+                      : 'review-bad';
+
+                  return (
+                    <details key={item.index} className={`review-item ${itemClass}`}>
+                      <summary>
+                        <span className="review-qnum">Q{item.index + 1}</span>
+                        <span className="review-title">{item.title}</span>
+                        <span className={`review-badge ${statusClass}`}>{statusLabel}</span>
+                      </summary>
+                      <div className="review-body">
+                        <p className="pill">{item.sectionName}</p>
+                        <p className="question-text">{item.text}</p>
+                        <ul className="review-answers">
+                          {item.answered && item.selectedAnswer ? (
+                            <li>
+                              <strong>Your answer:</strong> {item.selectedAnswer} —{' '}
+                              {item.options[item.selectedAnswer]}
+                            </li>
+                          ) : (
+                            <li>
+                              <strong>Your answer:</strong> Not answered
+                            </li>
+                          )}
+                          <li>
+                            <strong>Correct answer:</strong> {item.correctAnswer} —{' '}
+                            {item.options[item.correctAnswer]}
+                          </li>
+                        </ul>
+                        <p className="review-explanation">{item.explanation}</p>
+                      </div>
+                    </details>
+                  );
+                })}
               </div>
             )}
 
-            <button className="btn primary" onClick={restart}>
-              New practice session
-            </button>
+            <div className="results-actions">
+              <button className="btn primary" onClick={restart}>
+                New practice session
+              </button>
+            </div>
           </section>
         )}
       </main>
