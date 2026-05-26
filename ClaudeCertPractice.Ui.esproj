@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.VisualStudio.JavaScript.Sdk/1.0.5581896">
+  <PropertyGroup>
+    <StartupCommand>npm run dev</StartupCommand>
+    <BuildCommand>npm run build</BuildCommand>
+    <ShouldRunBuildScript>false</ShouldRunBuildScript>
+    <DevServerPort>5173</DevServerPort>
+    <JavaScriptTestRoot>src\</JavaScriptTestRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="package.json" />
+    <None Include="vite.config.ts" />
+    <None Include="tsconfig.json" />
+    <None Include="index.html" />
+  </ItemGroup>
+</Project>

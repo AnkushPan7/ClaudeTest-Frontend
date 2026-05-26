@@ -3,12 +3,16 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: '../backend/ClaudeCertPractice.Api/wwwroot',
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
+    open: true,
     proxy: {
       '/api': {
-        // target: 'http://localhost:5299',
-        target: 'https://claudetest-backend.onrender.com',
+        target: 'http://localhost:5299',
         changeOrigin: true,
       },
     },

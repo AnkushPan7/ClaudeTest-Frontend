@@ -15,6 +15,7 @@ import {
   toSessionScaledScore,
   type SessionExamTargets,
 } from './api';
+import { FormatText } from './formatText';
 
 type Screen = 'home' | 'quiz' | 'submit-review' | 'results';
 
@@ -53,7 +54,7 @@ export default function App() {
         setMeta(m);
         const ai = m.questionSource.toLowerCase() === 'ai';
         setUseAiMode(ai);
-        setLearningUrl(m.learningUrl ?? '');
+        setLearningUrl(m.learningUrl ?? m.learningUrls?.[0] ?? '');
         const max = ai ? m.maxQuestionsPerSession : m.totalQuestions;
         setQuestionCount(Math.min(10, max));
       })
@@ -75,7 +76,6 @@ export default function App() {
         questionCount,
         selectedSections.length ? selectedSections : undefined,
         useAiMode ? 'Ai' : 'Json',
-        useAiMode ? learningUrl : undefined,
       );
       setSession(s);
       setIndex(0);
@@ -241,13 +241,17 @@ export default function App() {
     (meta && summary ? getSessionExamTargets(summary.total, meta) : null);
 
   const scaledScore =
-    summary && resultsTargets
+    summary && resultsTargets && summary.answered > 0
       ? toSessionScaledScore(summary.percentCorrect, resultsTargets)
       : null;
   const certPass =
     scaledScore !== null && resultsTargets
       ? scaledScore >= resultsTargets.passingScore
       : false;
+  const resultsScoreDisplay =
+    summary && (summary.answered === 0 || summary.percentCorrect === 0)
+      ? `${summary.percentCorrect}%`
+      : String(scaledScore ?? summary?.percentCorrect ?? 0);
 
   const answeredCount = Object.keys(answersByIndex).length;
   const totalQuestions = session?.totalQuestions ?? 0;
@@ -265,23 +269,37 @@ export default function App() {
             <p>Practice exam — By AppUnik</p>
           </div>
         </div>
-        {showExamTimer && session && sessionTargets && (
-          <div className="header-stats">
-            <span
-              className={`mono exam-timer ${remainingSeconds <= 300 ? 'timer-low' : ''}`}
-              title={`Time limit for ${session.totalQuestions} questions`}
-            >
-              {formatRemainingTime(remainingSeconds)} /{' '}
-              {formatRemainingTime(sessionTargets.timeLimitSeconds)}
-            </span>
-            {screen === 'quiz' && (
-              <span className="mono">
-                Q{index + 1}/{session.totalQuestions}
+        <div className="header-end">
+          {showExamTimer && session && sessionTargets && (
+            <div className="header-stats">
+              <span
+                className={`mono exam-timer ${remainingSeconds <= 300 ? 'timer-low' : ''}`}
+                title={`Time limit for ${session.totalQuestions} questions`}
+              >
+                {formatRemainingTime(remainingSeconds)} /{' '}
+                {formatRemainingTime(sessionTargets.timeLimitSeconds)}
               </span>
-            )}
-            {screen === 'submit-review' && <span className="muted">Submit review</span>}
+              {screen === 'quiz' && (
+                <span className="mono">
+                  Q{index + 1}/{session.totalQuestions}
+                </span>
+              )}
+              {screen === 'submit-review' && <span className="muted">Submit review</span>}
+            </div>
+          )}
+          <div className="header-logos">
+            <img
+              src="/logos/claude.png"
+              alt="Claude Certified Architect"
+              className="header-logo header-logo-claude"
+            />
+            <img
+              src="/logos/appunik.png"
+              alt="AppUnik"
+              className="header-logo header-logo-appunik"
+            />
           </div>
-        )}
+        </div>
       </header>
 
       <main className="main">
@@ -289,12 +307,12 @@ export default function App() {
 
         {screen === 'home' && (
           <section className="card home-card">
-            <h2>Start a practice session</h2>
+            <h2>Start a new practice session</h2>
             <p className="muted">
-              Official CCA-F format: multiple choice (1 correct, 3 distractors). Full exam is{' '}
-              {meta?.totalQuestions ?? 60} questions, <strong>2:00:00</strong>, pass{' '}
-              {meta?.passingScore ?? 720}/{meta?.scoreMax ?? 1000} scaled. Your selection below
-              scales time and pass targets proportionally.
+              Official CCA-F format: multiple choice (1 correct, 3 distractors). Full exam is 60
+              questions, <strong>2:00:00</strong>, pass {meta?.passingScore ?? 720}/
+              {meta?.scoreMax ?? 1000} scaled. Your selection below scales time and pass targets
+              proportionally.
             </p>
 
             {meta && (
@@ -303,7 +321,7 @@ export default function App() {
                   <summary>Exam guide summary (from Anthropic materials)</summary>
                   <p className="hint">{meta.responseFormat}</p>
                   <p className="hint">{meta.examScenariosNote}</p>
-                  <ul className="domain-list">
+                  <ul className="domain-list domain-list-grid">
                     {meta.sections.map((d) => (
                       <li key={d.id}>
                         <strong>{d.name}</strong> <em className="muted">({d.range})</em>
@@ -325,58 +343,59 @@ export default function App() {
                 </details>
                 <fieldset className="sections source-mode">
                   <legend>Question source</legend>
-                  <label className="checkbox">
-                    <input
-                      type="radio"
-                      name="source"
-                      checked={!useAiMode}
-                      onChange={() => {
-                        setUseAiMode(false);
-                        if (meta) setQuestionCount((c) => Math.min(c, meta.totalQuestions));
-                      }}
-                    />
-                    <span>
-                      <strong>Sample Exam(Real Claude Certified Architect Exam)</strong> — random pick from 60 saved questions (fast)
-                    </span>
-                  </label>
-                  <label className="checkbox">
-                    <input
-                      type="radio"
-                      name="source"
-                      checked={useAiMode}
-                      onChange={() => {
-                        setUseAiMode(true);
-                        if (meta) setQuestionCount((c) => Math.min(c, meta.maxQuestionsPerSession));
-                      }}
-                      disabled={!meta.aiGenerationAvailable}
-                    />
-                    <span>
-                      <strong>AI from learning URL</strong> — Claude writes new questions each
-                      session
-                      {!meta.aiGenerationAvailable && (
-                        <em className="muted">
-                          {' '}
-                          (set ANTHROPIC_API_KEY or AnthropicApiKey in backend .env)
-                        </em>
-                      )}
-                    </span>
-                  </label>
+                  <div className="source-options">
+                    <label className="checkbox source-option">
+                      <input
+                        type="radio"
+                        name="source"
+                        checked={!useAiMode}
+                        onChange={() => {
+                          setUseAiMode(false);
+                          if (meta) setQuestionCount((c) => Math.min(c, meta.totalQuestions));
+                        }}
+                      />
+                      <span>
+                        <strong>Practice question bank</strong> — Source : Real Claude
+                        certification program exam
+                      </span>
+                    </label>
+                    <label className="checkbox source-option">
+                      <input
+                        type="radio"
+                        name="source"
+                        checked={useAiMode}
+                        onChange={() => {
+                          setUseAiMode(true);
+                          if (meta)
+                            setQuestionCount((c) => Math.min(c, meta.maxQuestionsPerSession));
+                        }}
+                        disabled={!meta.aiGenerationAvailable}
+                      />
+                      <span>
+                        <strong>AI from learning URL</strong> — Claude writes new questions each
+                        session
+                        {!meta.aiGenerationAvailable && (
+                          <em className="muted">
+                            {' '}
+                            (set ANTHROPIC_API_KEY or AnthropicApiKey in backend .env)
+                          </em>
+                        )}
+                      </span>
+                    </label>
+                  </div>
                 </fieldset>
 
-                {useAiMode && (
-                  <label className="field">
+                {meta.aiGenerationAvailable && (
+                  <label className="field learning-url-field">
                     <span>Learning material URL</span>
                     <input
                       type="url"
                       className="url-input"
                       value={learningUrl}
-                      onChange={(e) => setLearningUrl(e.target.value)}
-                      placeholder="https://..."
+                      disabled
+                      readOnly
+                      aria-readonly="true"
                     />
-                    <p className="hint">
-                      The API fetches this page and Claude generates exam-style questions from the
-                      content. First session may take 30–90 seconds.
-                    </p>
                   </label>
                 )}
 
@@ -407,20 +426,23 @@ export default function App() {
                   </p>
                 )}
 
-                <fieldset className="sections">
+                <fieldset className="sections domain-mode">
                   <legend>Filter by exam domain (optional)</legend>
-                  {meta.sections.map((s) => (
-                    <label key={s.id} className="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedSections.includes(s.id)}
-                        onChange={() => toggleSection(s.id)}
-                      />
-                      <span>
-                        {s.name} <em className="muted">({s.range})</em>
-                      </span>
-                    </label>
-                  ))}
+                  <div className="domain-options">
+                    {meta.sections.map((s) => (
+                      <label key={s.id} className="checkbox domain-option">
+                        <input
+                          type="checkbox"
+                          checked={selectedSections.includes(s.id)}
+                          onChange={() => toggleSection(s.id)}
+                        />
+                        <span>
+                          <strong>{s.name}</strong>{' '}
+                          <em className="muted">({s.range})</em>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                   <p className="hint">
                     {useAiMode
                       ? 'Optional topic focus for AI generation.'
@@ -434,7 +456,6 @@ export default function App() {
                   disabled={
                     loading ||
                     !meta ||
-                    (useAiMode && !learningUrl.trim()) ||
                     (useAiMode && !meta.aiGenerationAvailable)
                   }
                 >
@@ -472,22 +493,32 @@ export default function App() {
               <span className="pill">{question.sectionName}</span>
               <span className="muted">{question.title}</span>
             </div>
-            <h2 className="question-text">{question.text}</h2>
+            <h2 className="question-text">
+              <FormatText text={question.text} />
+            </h2>
 
-            <div className="options">
+            <div className="options" role="radiogroup" aria-label="Answer choices">
               {(['A', 'B', 'C', 'D'] as const).map((letter) => {
                 const text = question.options[letter];
                 if (!text) return null;
-                const state = selectedLetter === letter ? 'selected' : '';
+                const selected = selectedLetter === letter;
                 return (
                   <button
                     key={letter}
-                    className={`option ${state}`}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    className={`option ${selected ? 'selected' : ''}`}
                     onClick={() => pickAnswer(letter)}
                     disabled={loading}
                   >
-                    <span className="letter">{letter}</span>
-                    <span>{text}</span>
+                    <span className="option-radio" aria-hidden="true" />
+                    <span className="option-letter" aria-hidden="true">
+                      {letter}
+                    </span>
+                    <span className="option-text">
+                      <FormatText text={text} />
+                    </span>
                   </button>
                 );
               })}
@@ -645,13 +676,15 @@ export default function App() {
           <section className="card results-card">
             <h2>Session complete</h2>
             <div className={`score-ring ${certPass ? 'pass' : 'fail'}`}>
-              <span className="score-value">{scaledScore ?? summary.percentCorrect}</span>
+              <span className="score-value">{resultsScoreDisplay}</span>
               <span className="score-label">
-                {resultsTargets
-                  ? certPass
-                    ? `Scaled score — at/above ${resultsTargets.passingScore} pass (${resultsTargets.questionCount} questions)`
-                    : `Below ${resultsTargets.passingScore} pass (${summary.percentCorrect}% correct)`
-                  : `${summary.percentCorrect}% correct`}
+                {summary.answered === 0
+                  ? 'No answers submitted — unanswered questions count as incorrect'
+                  : resultsTargets && scaledScore != null
+                    ? certPass
+                      ? `Scaled score — at/above ${resultsTargets.passingScore} pass (${resultsTargets.questionCount} questions)`
+                      : `Below ${resultsTargets.passingScore} pass (${summary.percentCorrect}% correct)`
+                    : `${summary.percentCorrect}% correct`}
               </span>
             </div>
             <ul className="stats">
@@ -706,24 +739,41 @@ export default function App() {
                       </summary>
                       <div className="review-body">
                         <p className="pill">{item.sectionName}</p>
-                        <p className="question-text">{item.text}</p>
-                        <ul className="review-answers">
-                          {item.answered && item.selectedAnswer ? (
-                            <li>
-                              <strong>Your answer:</strong> {item.selectedAnswer} —{' '}
-                              {item.options[item.selectedAnswer]}
-                            </li>
-                          ) : (
-                            <li>
-                              <strong>Your answer:</strong> Not answered
-                            </li>
-                          )}
-                          <li>
-                            <strong>Correct answer:</strong> {item.correctAnswer} —{' '}
-                            {item.options[item.correctAnswer]}
-                          </li>
+                        <p className="question-text">
+                          <FormatText text={item.text} />
+                        </p>
+                        <ul className="review-options">
+                          {(['A', 'B', 'C', 'D'] as const).map((letter) => {
+                            const optText = item.options[letter];
+                            if (!optText) return null;
+                            const isSelected = item.selectedAnswer === letter;
+                            const isCorrect = item.correctAnswer === letter;
+                            const state = isCorrect
+                              ? 'correct'
+                              : isSelected && !item.isCorrect
+                                ? 'wrong'
+                                : isSelected
+                                  ? 'selected'
+                                  : '';
+                            return (
+                              <li
+                                key={letter}
+                                className={`review-option ${state}`}
+                              >
+                                <span className="option-radio" aria-hidden="true" />
+                                <span className="option-letter" aria-hidden="true">
+                                  {letter}
+                                </span>
+                                <span className="option-text">
+                                  <FormatText text={optText} />
+                                </span>
+                              </li>
+                            );
+                          })}
                         </ul>
-                        <p className="review-explanation">{item.explanation}</p>
+                        <p className="review-explanation">
+                          <FormatText text={item.explanation} />
+                        </p>
                       </div>
                     </details>
                   );

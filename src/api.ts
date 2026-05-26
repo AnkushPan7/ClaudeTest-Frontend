@@ -5,10 +5,12 @@ export type ExamScenarioInfo = { id: number; name: string; primaryDomains: strin
 export type ExamMetadata = {
   examTitle: string;
   totalQuestions: number;
+  bankQuestionCount: number;
   sections: SectionInfo[];
   questionSource: string;
   aiGenerationAvailable: boolean;
   learningUrl: string | null;
+  learningUrls: string[] | null;
   maxQuestionsPerSession: number;
   passingScore: number;
   scoreMin: number;
